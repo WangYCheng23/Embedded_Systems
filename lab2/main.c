@@ -1,8 +1,5 @@
+//*****************************************************************************
 //
-*****************************************************************************
-//James Nelson
-//Cheng Wang
-
 // Copyright (C) 2014 Texas Instruments Incorporated - http://www.ti.com/ 
 // 
 // 
@@ -38,75 +35,73 @@
 
 //*****************************************************************************
 //
-// Application Name     - I2C 
-// Application Overview - The objective of this application is act as an I2C 
-//                        diagnostic tool. The demo application is a generic 
-//                        implementation that allows the user to communicate 
-//                        with any I2C device over the lines. 
+// Application Name     - SPI Demo
+// Application Overview - The demo application focuses on showing the required 
+//                        initialization sequence to enable the CC3200 SPI 
+//                        module in full duplex 4-wire master and slave mode(s).
 // Application Details  -
-// http://processors.wiki.ti.com/index.php/CC32xx_I2C_Application
+// http://processors.wiki.ti.com/index.php/CC32xx_SPI_Demo
 // or
-// docs\examples\CC32xx_I2C_Application.pdf
+// docs\examples\CC32xx_SPI_Demo.pdf
 //
 //*****************************************************************************
 
+
 //*****************************************************************************
 //
-//! \addtogroup i2c_demo
+//! \addtogroup SPI_Demo
 //! @{
 //
 //*****************************************************************************
 
 // Standard includes
-#include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
 
 // Driverlib includes
 #include "hw_types.h"
-#include "hw_ints.h"
 #include "hw_memmap.h"
 #include "hw_common_reg.h"
+#include "hw_ints.h"
+#include "spi.h"
 #include "rom.h"
 #include "rom_map.h"
-#include "interrupt.h"
-#include "prcm.h"
 #include "utils.h"
+#include "prcm.h"
 #include "uart.h"
-#include "spi.h"
-// Common interface includes
-#include "uart_if.h"
-#include "i2c_if.h"
-
-#include "pinmux.h"
+#include "interrupt.h"
 
 // Common interface includes
 #include "uart_if.h"
-
-//adafruit files
+#include "pin_mux_config.h"
 #include "Adafruit_GFX.h"
 #include "Adafruit_SSD1351.h"
 #include "test.h"
 
-
-//*****************************************************************************
-//                      MACRO DEFINITIONS
-//*****************************************************************************
 #define APPLICATION_VERSION     "1.1.1"
-#define APP_NAME                "I2C Demo"
-#define UART_PRINT              Report
-#define FOREVER                 1
-#define CONSOLE                 UARTA0_BASE
-#define FAILURE                 -1
-#define SUCCESS                 0
-#define RETERR_IF_TRUE(condition) {if(condition) return FAILURE;}
-#define RET_IF_ERR(Func)          {int iRetVal = (Func); \
-                                   if (SUCCESS != iRetVal) \
-                                     return  iRetVal;}
+//*****************************************************************************
+//
+// Application Master/Slave mode selector macro
+//
+// MASTER_MODE = 1 : Application in master mode
+// MASTER_MODE = 0 : Application in slave mode
+//
+//*****************************************************************************
+#define MASTER_MODE      1
+
+#define SPI_IF_BIT_RATE  100000
+#define TR_BUFF_SIZE     100
+
+#define MASTER_MSG       "This is CC3200 SPI Master Application\n\r"
+#define SLAVE_MSG        "This is CC3200 SPI Slave Application\n\r"
 
 //*****************************************************************************
 //                 GLOBAL VARIABLES -- Start
 //*****************************************************************************
+static unsigned char g_ucTxBuff[TR_BUFF_SIZE];
+static unsigned char g_ucRxBuff[TR_BUFF_SIZE];
+static unsigned char ucTxBuffNdx;
+static unsigned char ucRxBuffNdx;
+
 #if defined(ccs)
 extern void (* const g_pfnVectors[])(void);
 #endif
@@ -120,15 +115,244 @@ extern uVectorEntry __vector_table;
 
 
 //*****************************************************************************
+//
+//! SPI Slave Interrupt handler
+//!
+//! This function is invoked when SPI slave has its receive register full or
+//! transmit register empty.
+//!
+//! \return None.
+//
+//*****************************************************************************
+/*
+static void SlaveIntHandler()
+{
+    unsigned long ulRecvData;
+    unsigned long ulStatus;
 
+    ulStatus = MAP_SPIIntStatus(GSPI_BASE,true);
+
+    MAP_SPIIntClear(GSPI_BASE,SPI_INT_RX_FULL|SPI_INT_TX_EMPTY);
+
+    if(ulStatus & SPI_INT_TX_EMPTY)
+    {
+        MAP_SPIDataPut(GSPI_BASE,g_ucTxBuff[ucTxBuffNdx%TR_BUFF_SIZE]);
+        ucTxBuffNdx++;
+    }
+
+    if(ulStatus & SPI_INT_RX_FULL)
+    {
+        MAP_SPIDataGetNonBlocking(GSPI_BASE,&ulRecvData);
+        g_ucTxBuff[ucRxBuffNdx%TR_BUFF_SIZE] = ulRecvData;
+        Report("%c",ulRecvData);
+        ucRxBuffNdx++;
+    }
+}
+*/
+//*****************************************************************************
+//
+//! SPI Master mode main loop
+//!
+//! This function configures SPI modelue as master and enables the channel for
+//! communication
+//!
+//! \return None.
+//
+//*****************************************************************************
+/*void MasterMain()
+{
+
+    unsigned long ulUserData;
+    unsigned long ulDummy;
+
+    //
+    // Initialize the message
+    //
+    memcpy(g_ucTxBuff,MASTER_MSG,sizeof(MASTER_MSG));
+
+    //
+    // Set Tx buffer index
+    //
+    ucTxBuffNdx = 0;
+    ucRxBuffNdx = 0;
+
+    //
+    // Reset SPI
+    //
+    MAP_SPIReset(GSPI_BASE);
+
+    //
+    // Configure SPI interface
+    //
+    MAP_SPIConfigSetExpClk(GSPI_BASE,MAP_PRCMPeripheralClockGet(PRCM_GSPI),
+                     SPI_IF_BIT_RATE,SPI_MODE_MASTER,SPI_SUB_MODE_0,
+                     (SPI_SW_CTRL_CS |
+                     SPI_4PIN_MODE |
+                     SPI_TURBO_OFF |
+                     SPI_CS_ACTIVEHIGH |
+                     SPI_WL_8));
+
+    //
+    // Enable SPI for communication
+    //
+    MAP_SPIEnable(GSPI_BASE);
+
+    //
+    // Print mode on uart
+    //
+    Message("Enabled SPI Interface in Master Mode\n\r");
+
+    //
+    // User input
+    //
+    Report("Press any key to transmit data....");
+
+    //
+    // Read a character from UART terminal
+    //
+    ulUserData = MAP_UARTCharGet(UARTA0_BASE);
+
+
+    //
+    // Send the string to slave. Chip Select(CS) needs to be
+    // asserted at start of transfer and deasserted at the end.
+    //
+    MAP_SPITransfer(GSPI_BASE,g_ucTxBuff,g_ucRxBuff,50,
+            SPI_CS_ENABLE|SPI_CS_DISABLE);
+
+    //
+    // Report to the user
+    //
+    Report("\n\rSend      %s",g_ucTxBuff);
+    Report("Received  %s",g_ucRxBuff);
+
+    //
+    // Print a message
+    //
+    Report("\n\rType here (Press enter to exit) :");
+
+    //
+    // Initialize variable
+    //
+    ulUserData = 0;
+
+    //
+    // Enable Chip select
+    //
+    MAP_SPICSEnable(GSPI_BASE);
+
+    //
+    // Loop until user "Enter Key" is
+    // pressed
+    //
+    while(ulUserData != '\r')
+    {
+        //
+        // Read a character from UART terminal
+        //
+        ulUserData = MAP_UARTCharGet(UARTA0_BASE);
+
+        //
+        // Echo it back
+        //
+        MAP_UARTCharPut(UARTA0_BASE,ulUserData);
+
+        //
+        // Push the character over SPI
+        //
+        MAP_SPIDataPut(GSPI_BASE,ulUserData);
+
+        //
+        // Clean up the receive register into a dummy
+        // variable
+        //
+        MAP_SPIDataGet(GSPI_BASE,&ulDummy);
+    }
+
+    //
+    // Disable chip select
+    //
+    MAP_SPICSDisable(GSPI_BASE);
+}
+*/
+//*****************************************************************************
+//
+//! SPI Slave mode main loop
+//!
+//! This function configures SPI modelue as slave and enables the channel for
+//! communication
+//!
+//! \return None.
+//
+//*****************************************************************************
+/*
+void SlaveMain()
+{
+    //
+    // Initialize the message
+    //
+    memcpy(g_ucTxBuff,SLAVE_MSG,sizeof(SLAVE_MSG));
+
+    //
+    // Set Tx buffer index
+    //
+    ucTxBuffNdx = 0;
+    ucRxBuffNdx = 0;
+
+    //
+    // Reset SPI
+    //
+    MAP_SPIReset(GSPI_BASE);
+
+    //
+    // Configure SPI interface
+    //
+    MAP_SPIConfigSetExpClk(GSPI_BASE,MAP_PRCMPeripheralClockGet(PRCM_GSPI),
+                     SPI_IF_BIT_RATE,SPI_MODE_SLAVE,SPI_SUB_MODE_0,
+                     (SPI_HW_CTRL_CS |
+                     SPI_4PIN_MODE |
+                     SPI_TURBO_OFF |
+                     SPI_CS_ACTIVEHIGH |
+                     SPI_WL_8));
+
+    //
+    // Register Interrupt Handler
+    //
+    MAP_SPIIntRegister(GSPI_BASE,SlaveIntHandler);
+
+    //
+    // Enable Interrupts
+    //
+    MAP_SPIIntEnable(GSPI_BASE,SPI_INT_RX_FULL|SPI_INT_TX_EMPTY);
+
+    //
+    // Enable SPI for communication
+    //
+    MAP_SPIEnable(GSPI_BASE);
+
+    //
+    // Print mode on uart
+    //
+    Message("Enabled SPI Interface in Slave Mode\n\rReceived : ");
+}
+*/
+//*****************************************************************************
+//
+//! Board Initialization & Configuration
+//!
+//! \param  None
+//!
+//! \return None
+//
+//*****************************************************************************
 static void
 BoardInit(void)
 {
 /* In case of TI-RTOS vector table is initialize by OS itself */
 #ifndef USE_TIRTOS
-    //
-    // Set vector table base
-    //
+  //
+  // Set vector table base
+  //
 #if defined(ccs)
     MAP_IntVTableBaseSet((unsigned long)&g_pfnVectors[0]);
 #endif
@@ -147,78 +371,107 @@ BoardInit(void)
 
 //*****************************************************************************
 //
-//! Main function handling the I2C example
+//! Main function for spi demo application
 //!
-//! \param  None
+//! \param none
 //!
-//! \return None
-//! 
+//! \return None.
+//
 //*****************************************************************************
 void main()
 {
-
-    int x, y;
-    int xCoord = 64;//start at WIDTH/2
-    int yCoord = 64;//start at WIDTH/2
-    unsigned char xAddr = 0x03;
-    unsigned char yAddr = 0x05;
-    unsigned char xAccel, yAccel;
-    float frameSize = .08;
     //
-    // Initialize board configurations
+    // Initialize Board configurations
     //
     BoardInit();
-    
+
     //
-    // Configure the pinmux settings for the peripherals exercised
+    // Muxing UART and SPI lines.
     //
     PinMuxConfig();
-    
+
     //
-    // Configuring UART
+    // Enable the SPI module clock
     //
-    InitTerm();
-    
+    MAP_PRCMPeripheralClkEnable(PRCM_GSPI,PRCM_RUN_MODE_CLK);
     //
-    // I2C Init
-    //
-    I2C_IF_Open(I2C_MASTER_MODE_FST);
-    
-    //Enable SPI
-    MAP_SPIReset(GSPI_BASE);
+       // Reset SPI
+       //
+       MAP_SPIReset(GSPI_BASE);
 
        //
        // Configure SPI interface
+         //
+         MAP_SPIConfigSetExpClk(GSPI_BASE,MAP_PRCMPeripheralClockGet(PRCM_GSPI),
+                                100000,SPI_MODE_MASTER,SPI_SUB_MODE_0,
+                          (SPI_SW_CTRL_CS |
+                          SPI_4PIN_MODE |
+                          SPI_TURBO_OFF |
+                          SPI_CS_ACTIVELOW |
+                          SPI_WL_8));
+
+         SPICSEnable(GPIOA0_BASE);
+
        //
-       MAP_SPIConfigSetExpClk(GSPI_BASE,MAP_PRCMPeripheralClockGet(PRCM_GSPI),
-                              100000,SPI_MODE_MASTER,SPI_SUB_MODE_0,
-                        (SPI_SW_CTRL_CS |
-                        SPI_4PIN_MODE |
-                        SPI_TURBO_OFF |
-                        SPI_CS_ACTIVELOW |
-                        SPI_WL_8));
-
-       SPICSEnable(GPIOA0_BASE);
-
+       // Enable SPI for communication
+       //
        MAP_SPIEnable(GSPI_BASE);
-
-          //Oled initialize
-          Adafruit_Init();
     //
-    // Display the banner followed by the usage description
+       Adafruit_Init();
     //
+    // Initialising the Terminal.
+    //
+    InitTerm();
 
-    char *mes;
-    fillScreen(BLACK);
-    pongMain();
+    //
+    // Clearing the Terminal.
+    //
+    ClearTerm();
+
+    //
+    // Display the Banner
+    //
+    Message("\n\n\n\r");
+    Message("\t\t   ********************************************\n\r");
+    Message("\t\t        CC3200 SPI Demo Application  \n\r");
+    Message("\t\t   ********************************************\n\r");
+    Message("\n\n\n\r");
+
+    while(1){
+          fillScreen(BLACK);
+          setCursor(0,0);
+          characters();
+          MAP_UtilsDelay(20000000);
+          Outstr("Hello World!");
+          MAP_UtilsDelay(20000000);
+          lcdTestPattern();
+          MAP_UtilsDelay(20000000);
+          lcdTestPattern2();
+          MAP_UtilsDelay(20000000);
+          testlines(MAGENTA);
+          MAP_UtilsDelay(20000000);
+          testfastlines(BLUE, MAGENTA);
+          MAP_UtilsDelay(20000000);
+          testdrawrects(BLUE);
+          MAP_UtilsDelay(20000000);
+          testfillrects(BLUE, MAGENTA);
+          MAP_UtilsDelay(20000000);
+          testfillcircles(10, BLUE);
+          MAP_UtilsDelay(20000000);
+          testdrawcircles(10, BLUE);
+          MAP_UtilsDelay(20000000);
+          testtriangles();
+          MAP_UtilsDelay(20000000);
+          testroundrects();
+          MAP_UtilsDelay(20000000);
+
+      }
+    //
+    // Reset the peripheral
+    //
+    MAP_PRCMPeripheralReset(PRCM_GSPI);
+
+
 
 }
-
-//*****************************************************************************
-//
-// Close the Doxygen group.
-//! @
-//
-//*****************************************************************************
-
 
